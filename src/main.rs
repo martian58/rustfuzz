@@ -17,12 +17,12 @@ async fn main() {
         | | \ \ |_| \__ \ |_| | | |_| |/ / / / 
         |_|  \_\__,_|___/\__|_|  \__,_/___/___|
                                                 
-        rustfuzz - v0.2.0-dev
+        rustfuzz - v1.0.0
         "#
     );
 
     let matches = Command::new("rustfuzz")
-        .version("0.2.0")
+        .version("1.0.0")
         .author("Martian58")
         .about("Website fuzzer written in Rust")
         .arg(
