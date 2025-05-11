@@ -2,6 +2,12 @@
 name = "rustfuzz"
 version = "0.1.0"
 edition = "2021"
+authors = ["Fuad Alizada fuadelizade6@gmail.com"]
+license = "LICENSE"
+description = "Website Fuzzer implementation in Rust"
+repository = "https://github.com/martian58/rustfuzz.git"
+readme = "README.md"
+
 
 [dependencies]
 futures = "0.3"
@@ -11,3 +17,18 @@ clap = "4.0"
 indicatif = "0.17"
 
 
+[package.metadata.deb]
+maintainer = "martian58"
+license-file = "LICENSE"
+
+
+
+
+[package.metadata.rpm]
+package = "rustfuzz"
+
+[package.metadata.rpm.cargo]
+buildflags = ["--release"]
+
+[package.metadata.rpm.targets]
+rustfuzz = { path = "/usr/bin/rustfuzz" }
