@@ -192,6 +192,7 @@ txt3ms2
 coana
 lan
 openwebmail
+dashboard
 seoplink
 puertotorre
 uren
@@ -3326,6 +3327,7 @@ hanovercommon
 newsweb
 wa_photoassist
 vbcover
+get-bot-status
 caldemo
 bphoenix
 rehber

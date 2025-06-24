@@ -1,6 +1,6 @@
 [package]
 name = "rustfuzz"
-version = "3.0.0"
+version = "3.1.0"
 edition = "2021"
 authors = ["Fuad Alizada fuadelizade6@gmail.com"]
 license = "LICENSE"

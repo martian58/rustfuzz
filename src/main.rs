@@ -5,7 +5,7 @@ use rand::{seq::SliceRandom, thread_rng};
 use regex::Regex;
 use reqwest::{Client, Proxy};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, fs, time::Duration};
+use std::{collections::{HashSet, VecDeque}, fs, time::Duration};
 use std::sync::Arc;
 use tokio::{
     fs::File,
@@ -14,9 +14,8 @@ use tokio::{
     time::sleep,
 };
 use url::Url;
-
-// Needed for JSON export
 use serde_json;
+use csv;
 
 #[derive(Debug, Deserialize)]
 struct Config {
@@ -33,7 +32,7 @@ struct Config {
     export: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct FuzzResult {
     url: String,
     word: String,
@@ -53,12 +52,12 @@ async fn main() {
         | | \ \ |_| \__ \ |_| | | |_| |/ / / / 
         |_|  \_\__,_|___/\__|_|  \__,_/___/___|
                                                 
-        rustfuzz - v3.0.0
+        rustfuzz - v3.1.0
         "#
     );
 
     let matches = Command::new("rustfuzz")
-        .version("3.0.0")
+        .version("3.1.0")
         .author("Martian58 & Copilot")
         .about("Website fuzzer written in Rust - advanced edition")
         .arg(
@@ -170,7 +169,7 @@ async fn main() {
         .arg(
             Arg::new("crawl")
                 .long("crawl")
-                .help("Enable simple crawler to find more endpoints")
+                .help("Enable smart crawler to find more endpoints")
                 .action(ArgAction::SetTrue),
         )
         .arg(
@@ -180,7 +179,27 @@ async fn main() {
                 .help("Parse OpenAPI/Swagger spec for endpoints")
                 .action(ArgAction::Set),
         )
+        .arg(
+            Arg::new("analyze")
+                .long("analyze")
+                .help("Analyze and beautifully print results from an export file")
+                .action(ArgAction::Set),
+        )
         .get_matches();
+    // Require at least one of --analyze, --wordlist, or --crawl
+    let has_analyze = matches.get_one::<String>("analyze").is_some();
+    let has_wordlist = matches.get_one::<String>("wordlist").is_some() && !matches.get_one::<String>("wordlist").unwrap().is_empty();
+    let has_crawl = matches.get_flag("crawl");
+
+    if !(has_analyze || has_wordlist || has_crawl) {
+        eprintln!(
+            "Error: You must provide at least one of --analyze <file>, --wordlist <file>, or --crawl\n\
+            Example: rustfuzz --wordlist words.txt --url https://example.com\n\
+            Or:      rustfuzz --crawl --url https://example.com\n\
+            Or:      rustfuzz --analyze results.json"
+        );
+        std::process::exit(1);
+    }
 
     let mut config = if let Some(cfg_path) = matches.get_one::<String>("config") {
         let cfg_str = fs::read_to_string(cfg_path).expect("Failed to read config");
@@ -204,14 +223,10 @@ async fn main() {
             matcher: matches.get_one::<String>("matcher").cloned(),
             headers: matches
                 .get_many::<String>("headers")
-                .map(|vals| {
-                    vals.map(|kv| split_kv(kv)).collect()
-                }),
+                .map(|vals| vals.map(|kv| split_kv(kv)).collect()),
             cookies: matches
                 .get_many::<String>("cookie")
-                .map(|vals| {
-                    vals.map(|kv| split_kv(kv)).collect()
-                }),
+                .map(|vals| vals.map(|kv| split_kv(kv)).collect()),
             auth_token: matches.get_one::<String>("auth").cloned(),
             proxy: matches.get_one::<String>("proxy").cloned(),
             rate_limit: matches
@@ -257,7 +272,10 @@ async fn main() {
     println!();
 
     // Load wordlist
-    let mut words = load_wordlist(wordlist).await.expect("Failed to load wordlist");
+    let mut words = Vec::new();
+    if !wordlist.is_empty() {
+        words = load_wordlist(wordlist).await.expect("Failed to load wordlist");
+    }
 
     // Mutation-based fuzzing
     if matches.get_flag("mutate") {
@@ -271,10 +289,16 @@ async fn main() {
         words.append(&mut payloads);
     }
 
-    // Crawl mode: find additional endpoints
+    // Crawl mode: find additional endpoints (now smart)
     let mut discovered = HashSet::new();
     if matches.get_flag("crawl") {
-        let found = crawl(url).await;
+        let found = crawl(
+            url,
+            4,        // depth
+            1000,     // max pages
+            config.cookies.as_ref().unwrap_or(&vec![]),
+            config.headers.as_ref().unwrap_or(&vec![]),
+        ).await;
         for endpoint in &found {
             println!(":: Discovered endpoint: {}", endpoint);
         }
@@ -348,47 +372,40 @@ async fn main() {
                     auth_token.as_deref(),
                 )
                 .await;
-                let mut output = None;
                 match &res {
                     Ok((status, body)) => {
                         let reflected = body.contains(word);
                         let has_error = detect_error(body);
 
-                        // Only print if:
-                        // - Status code matches --matcher (e.g. 200, 301, etc)
-                        // - The response contains the tested word (reflected input)
-                        // - An error pattern is detected in the body
-                        if status_codes.contains(status)
-                        {
+                        // Only print/export if status in --matcher
+                        if status_codes.contains(status) {
                             println!(
                                 "{status} - {target}{}{}",
                                 if reflected { " [REFLECTED]" } else { "" },
                                 if has_error { " [ERROR]" } else { "" }
                             );
+                            let r = FuzzResult {
+                                url: target.clone(),
+                                word: word.to_string(),
+                                status: *status,
+                                reflected,
+                                error: if has_error { Some("Possible error detected".into()) } else { None },
+                            };
+                            results.lock().await.push(r);
                         }
-                        // 404s (and other non-matching codes) are hidden unless interesting
-                        output = Some(FuzzResult {
-                            url: target.clone(),
-                            word: word.to_string(),
-                            status: *status,
-                            reflected,
-                            error: if has_error { Some("Possible error detected".into()) } else { None },
-                        });
                     }
-                    Err(e) => {
-                        // Always show real network errors
-                        println!("ERR  - {target} [error: {e}]");
-                        output = Some(FuzzResult {
-                            url: target.clone(),
-                            word: word.to_string(),
-                            status: 0,
-                            reflected: false,
-                            error: Some(e.to_string()),
-                        });
+                    Err(_e) => {
+                        // Always show and export network errors
+                        // println!("ERR  - {target} [error: {e}]");
+                        // let r = FuzzResult {
+                        //     url: target.clone(),
+                        //     word: word.to_string(),
+                        //     status: 0,
+                        //     reflected: false,
+                        //     error: Some(e.to_string()),
+                        // };
+                        // results.lock().await.push(r);
                     }
-                }
-                if let Some(r) = output {
-                    results.lock().await.push(r);
                 }
                 progress_bar.inc(1);
             }
@@ -413,6 +430,11 @@ async fn main() {
         } else {
             println!(":: Unknown export format. Supported: .json, .csv");
         }
+    }
+
+    // Analyze results if requested
+    if let Some(analyze_file) = matches.get_one::<String>("analyze") {
+        analyze_results(analyze_file).await;
     }
 }
 
@@ -452,7 +474,7 @@ fn split_kv(s: &str) -> (String, String) {
 async fn fuzz_url_adv(
     client: &Client,
     url: &str,
-    word: &str,
+    _word: &str,
     headers: &Vec<(String, String)>,
     cookies: &Vec<(String, String)>,
     auth_token: Option<&str>,
@@ -495,22 +517,130 @@ fn detect_error(body: &str) -> bool {
     re.is_match(&body.to_lowercase())
 }
 
-async fn crawl(base_url: &str) -> HashSet<String> {
+/// Smart Crawler: BFS, supports cookies, headers, domain limit, ignores non-HTML, deduplicates, detects API/REST endpoints.
+pub async fn crawl(
+    base_url: &str,
+    max_depth: usize,
+    max_pages: usize,
+    cookies: &Vec<(String, String)>,
+    headers: &Vec<(String, String)>,
+) -> HashSet<String> {
     let mut found = HashSet::new();
+    let mut visited = HashSet::new();
+    let mut queue = VecDeque::new();
+
     let client = Client::new();
-    if let Ok(resp) = client.get(base_url).send().await {
-        if let Ok(body) = resp.text().await {
-            let re = Regex::new(r#"href\s*=\s*["']([^"']+)["']"#).unwrap();
-            for cap in re.captures_iter(&body) {
-                if let Some(link) = cap.get(1) {
-                    if let Ok(url) = Url::parse(base_url) {
-                        let joined = url.join(link.as_str()).unwrap_or_else(|_| url.clone());
-                        found.insert(joined.to_string());
+    let base_url = match Url::parse(base_url) {
+        Ok(u) => u,
+        Err(_) => return found,
+    };
+    let base_domain = base_url.domain().map(|d| d.to_string());
+
+    queue.push_back((base_url.clone(), 0));
+    visited.insert(base_url.as_str().to_string());
+
+    let href_re = Regex::new(r#"href\s*=\s*["']([^"'>]+)["']"#).unwrap();
+    let api_re = Regex::new(r#"(api|rest|openapi|swagger|v\d+)"#).unwrap();
+
+    // Prepare cookie/header string if needed
+    let cookie_str = if !cookies.is_empty() {
+        Some(
+            cookies
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, v))
+                .collect::<Vec<_>>()
+                .join("; ")
+        )
+    } else {
+        None
+    };
+
+    while let Some((url, depth)) = queue.pop_front() {
+        if depth > max_depth || found.len() >= max_pages {
+            break;
+        }
+
+        let mut req = client.get(url.as_str());
+        if let Some(ref c) = cookie_str {
+            req = req.header("Cookie", c);
+        }
+        for (k, v) in headers {
+            req = req.header(k, v);
+        }
+
+        let body = match req.send().await {
+            Ok(resp) => {
+                // Ignore non-HTML responses (e.g., images, PDFs)
+                let content_type = resp.headers().get("content-type")
+                    .and_then(|val| val.to_str().ok())
+                    .unwrap_or("");
+                if !content_type.starts_with("text/html") {
+                    continue;
+                }
+                match resp.text().await {
+                    Ok(txt) => txt,
+                    Err(_) => continue,
+                }
+            }
+            Err(_) => continue,
+        };
+
+        for cap in href_re.captures_iter(&body) {
+            let href = cap.get(1).unwrap().as_str();
+
+            // Ignore fragments, mailto, javascript, tel, data URIs, etc.
+            if href.starts_with('#')
+                || href.starts_with("mailto:")
+                || href.starts_with("javascript:")
+                || href.starts_with("tel:")
+                || href.starts_with("data:")
+            {
+                continue;
+            }
+
+            // Resolve relative/absolute
+            let Ok(joined) = url.join(href) else { continue; };
+
+            // Stay within the same domain (and scheme)
+            if let Some(domain) = joined.domain() {
+                if let Some(base) = &base_domain {
+                    if domain != base {
+                        continue;
                     }
                 }
             }
+            if joined.scheme() != base_url.scheme() {
+                continue;
+            }
+
+            let joined_str = joined.as_str().to_string();
+            // Skip duplicates
+            if !visited.insert(joined_str.clone()) {
+                continue;
+            }
+
+            // Ignore static assets (optional: expand this list)
+            if joined_str.ends_with(".jpg") || joined_str.ends_with(".jpeg")
+                || joined_str.ends_with(".png") || joined_str.ends_with(".gif")
+                || joined_str.ends_with(".svg") || joined_str.ends_with(".ico")
+                || joined_str.ends_with(".css") || joined_str.ends_with(".js")
+                || joined_str.ends_with(".woff") || joined_str.ends_with(".woff2")
+                || joined_str.ends_with(".ttf") || joined_str.ends_with(".eot")
+                || joined_str.ends_with(".pdf") || joined_str.ends_with(".zip")
+            {
+                continue;
+            }
+
+            // Mark interesting API endpoints as priority
+            if api_re.is_match(&joined_str) {
+                // Optionally: print or log "API endpoint detected"
+            }
+
+            found.insert(joined_str.clone());
+            queue.push_back((joined, depth + 1));
         }
     }
+
     found
 }
 
@@ -519,4 +649,93 @@ async fn parse_openapi(_url: &str) -> HashSet<String> {
     s.insert("https://example.com/api/v1/users".to_string());
     s.insert("https://example.com/api/v1/login".to_string());
     s
+}
+
+
+/// Analyze and beautifully print the results from JSON or CSV export file
+async fn analyze_results(path: &str) {
+    println!(":: Analyzing results from {path}");
+    let mut results: Vec<FuzzResult> = Vec::new();
+
+    if path.ends_with(".json") {
+        let file_content = match fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Failed to read file: {e}");
+                return;
+            }
+        };
+        results = match serde_json::from_str(&file_content) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("Failed to parse JSON: {e}");
+                return;
+            }
+        };
+    } else if path.ends_with(".csv") {
+        let mut rdr = match csv::Reader::from_path(path) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("Failed to open CSV: {e}");
+                return;
+            }
+        };
+        for result in rdr.deserialize() {
+            match result {
+                Ok(r) => results.push(r),
+                Err(e) => {
+                    eprintln!("Failed to deserialize row: {e}");
+                }
+            }
+        }
+    } else {
+        eprintln!("Unsupported file type for analysis: {path}");
+        return;
+    }
+
+    if results.is_empty() {
+        println!("No results to analyze.");
+        return;
+    }
+
+    // Beautiful summary and table
+    let total = results.len();
+    let success = results.iter().filter(|r| r.status >= 200 && r.status < 300).count();
+    let redirects = results.iter().filter(|r| r.status >= 300 && r.status < 400).count();
+    let client_err = results.iter().filter(|r| r.status >= 400 && r.status < 500).count();
+    let server_err = results.iter().filter(|r| r.status >= 500 && r.status < 600).count();
+    let reflected = results.iter().filter(|r| r.reflected).count();
+    let errors = results.iter().filter(|r| r.error.is_some()).count();
+
+    println!("\n===== Analysis Summary =====");
+    println!("Total Results : {}", total);
+    println!("2xx Success   : {}", success);
+    println!("3xx Redirects : {}", redirects);
+    println!("4xx ClientErr : {}", client_err);
+    println!("5xx ServerErr : {}", server_err);
+    println!("Reflected     : {}", reflected);
+    println!("Errors        : {}", errors);
+    println!("===========================\n");
+
+    // Pretty table (first 20 results)
+    println!("{:<5} {:<45} {:<8} {:<10} {:<10}", "Code", "URL", "Word", "Reflected", "Error");
+    println!("{}", "-".repeat(90));
+    for r in results.iter().take(20) {
+        println!(
+            "{:<5} {:<45} {:<8} {:<10} {:<10}",
+            r.status,
+            truncate(&r.url, 45),
+            truncate(&r.word, 8),
+            if r.reflected { "yes" } else { "" },
+            r.error.as_ref().map(|e| truncate(e, 10)).unwrap_or("".to_string())
+        );
+    }
+    if results.len() > 20 {
+        println!("... ({} more rows)", results.len() - 20);
+    }
+}
+
+fn truncate(s: &str, max: usize) -> String {
+    if s.len() <= max { s.to_string() }
+    else { format!("{}…", &s[..max-1]) }
 }
