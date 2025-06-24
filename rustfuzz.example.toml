@@ -1,10 +1,10 @@
 # RustFuzz Example Configuration File
 
 # The base URL to fuzz or crawl (required unless using --analyze mode)
-url = "https://kyklos.site"
+url = "https://example.com"
 
 # Path to your wordlist file
-wordlist = "wordlists/w2.txt"
+#wordlist = "wordlists/w2.txt"
 
 # Number of concurrent threads (default: 40)
 threads = 40
@@ -31,7 +31,10 @@ cookies = [
 #auth_token = "eyJhbGciOi..."
 
 # Proxy server (optional, e.g., "http://127.0.0.1:8080")
-#proxy = "https://127.0.0.1:8080"
+#proxy = "http://127.0.0.1:8080"
+#proxy = "socks5://103.90.228.7:46530"
+#proxy = "http://103.237.144.232:1311"
+
 
 # Rate limit between requests in milliseconds (optional)
 #rate_limit = 100
@@ -48,7 +51,7 @@ cookies = [
 
 # Enable crawling for endpoint discovery (set to true or false)
 # (Can also be enabled via --crawl)
-crawl = true
+#crawl = true
 
 # Optionally, specify an OpenAPI/Swagger spec URL for endpoint discovery
 # openapi = "https://example.com/openapi.json"
