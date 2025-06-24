@@ -1,0 +1,57 @@
+# RustFuzz Example Configuration File
+
+# The base URL to fuzz or crawl (required unless using --analyze mode)
+url = "https://kyklos.site"
+
+# Path to your wordlist file
+wordlist = "wordlists/w2.txt"
+
+# Number of concurrent threads (default: 40)
+threads = 40
+
+# Request timeout in seconds (default: 10)
+timeout = 15
+
+# Comma-separated list of status codes to match (default: "200,301,302,401,403,405,500")
+matcher = "200,301,302,405,500"
+
+# Custom headers (list of key-value pairs)
+headers = [
+  ["User-Agent", "RustFuzz/3.1"],
+  ["X-Api-Key", "your-api-key-here"]
+]
+
+# Custom cookies (list of key-value pairs)
+cookies = [
+  ["session", "Session_Key"],
+  ["auth", "token"]
+]
+
+# Bearer or other auth token (optional)
+#auth_token = "eyJhbGciOi..."
+
+# Proxy server (optional, e.g., "http://127.0.0.1:8080")
+#proxy = "https://127.0.0.1:8080"
+
+# Rate limit between requests in milliseconds (optional)
+#rate_limit = 100
+
+# Export results to a file (json or csv)
+#export = "results/output.json"
+
+# Enable mutation-based fuzzing (set to true or false)
+# (Can also be enabled via --mutate)
+#mutate = true
+
+# Additional payloads file (optional)
+#payloads = "payloads/xss.txt"
+
+# Enable crawling for endpoint discovery (set to true or false)
+# (Can also be enabled via --crawl)
+crawl = true
+
+# Optionally, specify an OpenAPI/Swagger spec URL for endpoint discovery
+# openapi = "https://example.com/openapi.json"
+
+# Optionally, analyze an export file
+#analyze = "results/test1.csv"

