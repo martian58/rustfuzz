@@ -4,7 +4,7 @@
 url = "https://kyklos.site"
 
 # Path to your wordlist file
-#wordlist = "wordlists/w2.txt"
+wordlist = "wordlists/w2.txt"
 
 # Number of concurrent threads (default: 40)
 threads = 40
@@ -23,7 +23,7 @@ headers = [
 
 # Custom cookies (list of key-value pairs)
 cookies = [
-  ["session", ".eJwljjkOwkAMAP-yNZG89h42n0G-VtAmpEL8nUh0U4xG8ymPtefxLPf3fuatPF5R7oXJyNCoSWXuY0ogegxzZbmokocSOBNVn6zTBisGSFtdF-harNbZUSb2Nqv3Vashkufogo5ucFUzLAYnhl6KtzWpJUQKaLlGziP3_00CUIjwxmG6NU_feAVsFh1kNAMSLN8f2iI5BQ.aFqOcQ.Totuux6PlcVg5AOBsTHKjHsXETU"],
+  ["session", "Session_Key"],
   ["auth", "token"]
 ]
 
@@ -31,7 +31,7 @@ cookies = [
 #auth_token = "eyJhbGciOi..."
 
 # Proxy server (optional, e.g., "http://127.0.0.1:8080")
-#proxy = "http://127.0.0.1:8080"
+#proxy = "https://127.0.0.1:8080"
 
 # Rate limit between requests in milliseconds (optional)
 #rate_limit = 100
@@ -48,10 +48,10 @@ cookies = [
 
 # Enable crawling for endpoint discovery (set to true or false)
 # (Can also be enabled via --crawl)
-#crawl = true
+crawl = true
 
 # Optionally, specify an OpenAPI/Swagger spec URL for endpoint discovery
 # openapi = "https://example.com/openapi.json"
 
 # Optionally, analyze an export file
-analyze = "results/test1.csv"
+#analyze = "results/test1.csv"
