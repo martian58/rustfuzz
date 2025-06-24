@@ -57,12 +57,12 @@ async fn main() {
         | | \ \ |_| \__ \ |_| | | |_| |/ / / / 
         |_|  \_\__,_|___/\__|_|  \__,_/___/___|
                                        
-        rustfuzz - v3.2.0
+        rustfuzz - v3.3.0
         "#
     );
 
     let matches = Command::new("rustfuzz")
-        .version("3.2.0")
+        .version("3.3.0")
         .author("Martian58")
         .about("Website fuzzer written in Rust - advanced edition")
         .arg(
@@ -251,6 +251,9 @@ async fn main() {
     if let Some(payloads) = matches.get_one::<String>("payloads") {
         config.payloads = Some(payloads.clone());
     }
+    if let Some(proxy) = matches.get_one::<String>("proxy") {
+        config.proxy = Some(proxy.clone());
+    }
     if let Some(analyze) = matches.get_one::<String>("analyze") {
         config.analyze = Some(analyze.clone());
     }
@@ -285,6 +288,9 @@ async fn main() {
     println!(":: Matcher          : {:?}", status_codes);
     if let Some(proxy) = &config.proxy {
         println!(":: Proxy            : {}", proxy);
+    }
+    if let Some(payloads) = &config.payloads {
+        println!(":: Payloads         : {}", payloads);
     }
     if let Some(export) = &config.export {
         println!(":: Export           : {}", export);
@@ -354,6 +360,7 @@ async fn main() {
     );
 
     let mut client_builder = Client::builder().timeout(Duration::from_secs(timeout));
+    client_builder = client_builder.danger_accept_invalid_certs(true); // Add this line for Burp
     if let Some(proxy) = &config.proxy {
         client_builder = client_builder.proxy(Proxy::all(proxy).expect("Invalid proxy"));
     }
@@ -417,7 +424,7 @@ async fn main() {
                     }
                     Err(_e) => {
                         // Always show and export network errors
-                        // println!("ERR  - {target} [error: {e}]");
+                        // println!("ERR  - {target} [error: {_e}]");
                         // let r = FuzzResult {
                         //     url: target.clone(),
                         //     word: word.to_string(),
